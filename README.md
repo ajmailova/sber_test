@@ -84,5 +84,5 @@
 
 ## 👩‍💻 Автор
 
-**Анна Жмайлова** • Junior Data Scientist  
+**Анна Жмайлова** • Data Scientist  
 [GitHub](https://github.com/ajmailova) • [Telegram](https://t.me/ajmailova)
