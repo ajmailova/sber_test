@@ -1,0 +1,4 @@
+client_id,client_name,transaction_type,transaction_count,average_amount,total_amount,last_transaction_date
+101,Иван Иванов,deposit,2.0,575.25,1150.5,2024-03-10
+102,Петр Петров,withdrawal,2.0,300.375,600.75,2024-07-18
+102,Петр Петров,deposit,1.0,300.5,300.5,2024-05-12

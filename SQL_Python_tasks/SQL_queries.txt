@@ -1,0 +1,95 @@
+1. Задание "Активность пользователей"
+Напишите SQL-запрос, который возвращает список пользователей с их ролями и количеством активностей за последний месяц. Учитывайте только те активности, которые были зарегистрированы в течение этого периода. Результаты должны быть отсортированы по количеству активностей в порядке убывания.
+
+Для выполнения задания используем СУБД - SQLite.
+-- Для каждого пользователя записываем через запятую все их роли
+WITH users_roles AS (SELECT u.id,
+                     u.username,
+                     GROUP_CONCAT(ur.role) AS roles
+                     FROM users u
+                     LEFT JOIN user_roles ur ON u.id = ur.user_id
+                     GROUP BY u.id
+                    )
+-- Считаем количество активностей для пользователей за последний месяц (в данном случае за октябрь 2024 года)
+SELECT ur.id, ur.username, ur.roles, COUNT(ua.user_id) AS activity_count
+FROM users_roles ur
+LEFT JOIN user_activity ua ON ur.id = ua.user_id 
+WHERE ua.activity_date >= '2024-10-01'
+GROUP BY ur.id
+ORDER BY activity_count DESC;
+
+
+
+2. Задание "Фильтрация транзакций"
+Вам поступила задача, которая заключается в разработке SQL-запроса для анализа данных о кредитных траншах (выплатах по кредитам от банка) и транзакциях (расходных операциях) клиентов. Необходимо найти по имеющимся таблицам кредитных траншей (tranches) и расходных операций (transactions) операции клиентов с контрагентами, соответствующие одному из двух условий:
+1) суммы которых "копейка в копейку" равны сумме зачисления при проверке расходных операций в периоде T+10 дней, где T - дата и время транша
+2) если не срабатывает пункт 1, для сопоставления транша и расходной операции, находимо собрать для транша все расходные операции, сумма которых превышает сумму транша (учитывая превысившую транзакцию).
+Анализ требуется провести за 2024 год.
+
+Для выполнения задания используем СУБД - SQLite.
+-- Оставляем только данные за 2024 год
+WITH tranches_2024 AS (SELECT * 
+                      FROM tranches
+                      WHERE operation_datetime >= '2024-01-01' 
+                      AND operation_datetime < '2025-01-01'),
+-- Находим транзакции, сумма которых равна сумме транша
+equal AS (SELECT t.inn,
+    t.operation_datetime AS tr_datetime,
+    t.operation_sum AS tr_sum,
+    ts.operation_datetime AS ts_datetime,
+    ts.ctrg_inn,
+    ts.operation_sum AS total_sum,
+    t.doc_id
+    FROM tranches_2024 t
+    JOIN transactions ts ON CAST(ts.inn AS TEXT) = t.inn AND ts.account = t.account
+    WHERE ts.operation_sum = t.operation_sum
+    AND ts.operation_datetime BETWEEN t.operation_datetime AND datetime(t.operation_datetime, '+10 days')
+     ),
+-- Оставшиеся транзакции, сумма которых превышает сумму транша
+greater AS (SELECT t.inn,
+    t.operation_datetime AS tr_datetime,
+    t.operation_sum AS tr_sum,
+    ts.operation_datetime AS ts_datetime,
+    ts.ctrg_inn,
+    SUM(ts.operation_sum) OVER (PARTITION BY t.doc_id ORDER BY ts.operation_datetime, ts.doc_id) AS total_sum,
+    t.doc_id
+  FROM tranches_2024 t 
+  JOIN transactions ts ON CAST(ts.inn AS TEXT) = t.inn AND ts.account = t.account
+  WHERE ts.operation_datetime BETWEEN t.operation_datetime AND datetime(t.operation_datetime, '+10 days')
+  AND t.doc_id NOT IN (SELECT doc_id FROM equal)
+)
+-- Объединями два условия: equal в приоритете, если не выполняется - смотрим на greater, остальные не попадут
+SELECT *
+FROM equal
+UNION ALL
+SELECT *
+FROM greater g 
+-- Находим дату первой транзакции, на которой накопленная сумма транзакций за период больше суммы транша, и оставляем только операции до этой даты включительно
+WHERE ts_datetime <= (SELECT MIN(ts_datetime)
+                      FROM greater g1 
+                      WHERE g1.doc_id = g.doc_id AND g1.total_sum >= g1.tr_sum)
+ORDER BY tr_datetime;
+
+
+3. Задание "Оптимизация SQL запроса"
+Вам необходимо оптимизировать SQL-запрос, который анализирует данные о клиентах банка, их счетах и транзакциях. В качестве решения предоставьте оптимизированный запрос и краткое описание внесенных изменений.
+
+SELECT
+    c.client_id,
+    c.name,
+    c.age,
+-- Агрегатные функции применяем сразу к результату соединения всех таблиц, а не внутри каждого подзапроса
+    COUNT(DISTINCT a.account_id) AS total_accounts,
+    SUM(DISTINCT a.balance) AS total_balance, 
+-- Считаем суммы разных типов событий в одном проходе по данным вместо отдельных подзапросов
+    SUM(CASE WHEN t.transaction_type = 'withdrawal' THEN 1 ELSE 0 END) AS total_withdrawals,
+    SUM(CASE WHEN t.transaction_type = 'deposit' THEN 1 ELSE 0 END) AS total_deposits
+FROM clients c
+-- Вместо подзапросов выбрали данные одним набором с помощью соединения
+LEFT JOIN accounts a ON a.client_id = c.client_id
+LEFT JOIN transactions t ON t.account_id = a.account_id
+WHERE c.registration_date >= '2020-01-01'
+-- Группируем для применения агрегатных функций по каждому клиенту
+GROUP BY c.client_id, c.name, c.age
+ORDER BY total_balance DESC;
+
